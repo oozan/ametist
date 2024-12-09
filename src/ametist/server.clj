@@ -11,6 +11,7 @@
 
 (set! *warn-on-reflection* true)
 
+;; HTML Renderer for the Index Page
 (defn index
   [_]
   (let [html [:html {:lang "en"}
@@ -27,27 +28,24 @@
               [:body
                [:div {:id "ametist"} "loading ..."]
                [:script {:src "/ametist/main.js"}]]]]
-    {:body    (->> html
-                (h/html {:mode :html})
-                (str "<!DOCTYPE html>\n"))
+    {:body    (str "<!DOCTYPE html>\n" (h/html {:mode :html} html))
      :headers {"Content-Type" "text/html"}
      :status  200}))
 
+;; Handlers for TODO Operations
 (defn list-todo
   [{::keys [atm-conn]}]
-  (let [response (jdbc/execute! atm-conn
-                   ["SELECT * FROM todo"])]
+  (let [response (jdbc/execute! atm-conn ["SELECT * FROM todo"])]
     {:body    (json/generate-string response)
      :headers {"Content-Type" "application/json"}
      :status  200}))
 
 (defn create-todo
-  [{::keys [atm-conn]
-    :keys  [body]}]
-  (let [note (some-> body
-               io/reader
-               (json/parse-stream true)
-               :note)]
+  [{::keys [atm-conn] :keys [body]}]
+  (let [note (-> body
+                 io/reader
+                 (json/parse-stream true)
+                 :note)]
     (when-not (note/valid? note)
       (throw (ex-info "Invalid note" {})))
     (jdbc/execute! atm-conn
@@ -58,60 +56,59 @@
 
 (defn install-schema
   [{::keys [atm-conn]}]
-  (jdbc/execute! atm-conn
-    ["CREATE TABLE todo (id serial, note text)"])
+  (jdbc/execute! atm-conn ["CREATE TABLE todo (id serial, note text)"])
   {:status 202})
 
+;; Routes Definition
 (def routes
   `#{["/" :get index]
      ["/todo" :get list-todo]
      ["/todo" :post create-todo]
      ["/install-schema" :post install-schema]})
 
+;; Pedestal Service Creation
 (defn create-service
   [service-map]
   (-> service-map
-    (assoc ::http/secure-headers {:content-security-policy-settings ""}
-           ::http/resource-path "public"
-           ::http/routes (fn []
-                           (route/expand-routes routes)))
-    http/default-interceptors
-    (update ::http/interceptors
-      (partial cons
-        (interceptor/interceptor {:enter (fn [ctx]
-                                           (update ctx :request merge service-map))})))))
+      (assoc ::http/secure-headers {:content-security-policy-settings ""}
+             ::http/resource-path "public"
+             ::http/routes (fn [] (route/expand-routes routes)))
+      http/default-interceptors
+      (update ::http/interceptors
+              (partial cons
+                (interceptor/interceptor
+                 {:enter (fn [ctx] (update ctx :request merge service-map))})))))
 
-(defonce state
-  (atom nil))
+;; Server State Management
+(defonce state (atom nil))
 
 (defn -main
   [& _]
   (let [port (Long/getLong "ametist.server.http-port" 8080)
         atm-db-url (System/getProperty "ametist.server.atm-db-url"
-                     "jdbc:postgresql://127.0.0.1:5432/postgres?user=postgres&password=postgres")]
+                                       "jdbc:postgresql://127.0.0.1:5432/postgres?user=postgres&password=postgres")]
     (swap! state
-      (fn [st]
-        (some-> st http/stop)
-        (-> {::http/port      port
-             ::atm-conn       {:jdbcUrl atm-db-url}
-             ::http/file-path "target/classes/public"
-             ::http/host      "0.0.0.0"
-             ::http/type      :jetty
-             ::http/join?     false}
-          create-service
-          http/dev-interceptors
-          http/create-server
-          http/start)))))
+           (fn [st]
+             (some-> st http/stop)
+             (-> {::http/port      port
+                  ::atm-conn       {:jdbcUrl atm-db-url}
+                  ::http/file-path "target/classes/public"
+                  ::http/host      "0.0.0.0"
+                  ::http/type      :jetty
+                  ::http/join?     false}
+                 create-service
+                 http/dev-interceptors
+                 http/create-server
+                 http/start)))))
 
 (comment
+  ;; Start PostgreSQL
   ;; docker run --name my-postgres --env=POSTGRES_PASSWORD=postgres --rm -p 5432:5432 postgres:alpine
-  (-> `shadow.cljs.devtools.server/start!
-    requiring-resolve
-    (apply []))
-  (-> `shadow.cljs.devtools.api/watch
-    requiring-resolve
-    (apply [:ametist]))
-  (-> `shadow.cljs.devtools.api/watch
-    requiring-resolve
-    (apply [:node-test]))
+
+  ;; Shadow CLJS Server for Frontend
+  (-> `shadow.cljs.devtools.server/start! requiring-resolve (apply []))
+  (-> `shadow.cljs.devtools.api/watch requiring-resolve (apply [:ametist]))
+  (-> `shadow.cljs.devtools.api/watch requiring-resolve (apply [:node-test]))
+
+  ;; Start the Backend
   (-main))
