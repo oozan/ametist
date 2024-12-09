@@ -1,0 +1,9 @@
+{:deps   {:aliases [:dev]}
+ :builds {:ametist   {:target     :browser
+                      :output-dir "target/classes/public/ametist"
+                      :asset-path "/ametist"
+                      :modules    {:main {:init-fn ametist.client/start}}
+                      :devtools   {:after-load ametist.client/after-load}}
+          :node-test {:target    :node-test
+                      :output-to "target/node-test.js"
+                      :autorun   true}}}
